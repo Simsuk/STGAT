@@ -24,7 +24,7 @@ from utils import (
 parser = argparse.ArgumentParser()
 parser.add_argument("--log_dir", default="./", help="Directory containing logging file")
 
-parser.add_argument("--dataset_name", default="zara2", type=str)
+parser.add_argument("--dataset_name", default="hotel", type=str)
 parser.add_argument("--delim", default="\t")
 parser.add_argument("--loader_num_workers", default=4, type=int)
 parser.add_argument("--obs_len", default=8, type=int)
@@ -193,7 +193,9 @@ def main(args):
                     "optimizer": optimizer.state_dict(),
                 },
                 is_best,
-                f"./checkpoint/checkpoint{epoch}.pth.tar",
+                epoch,
+                args.pred_len,
+                f"./checkpoint/checkpoint{args.dataset_name,args.best_k, epoch, args.pred_len}.pth.tar"
             )
     writer.close()
 
@@ -306,11 +308,11 @@ def cal_ade_fde(pred_traj_gt, pred_traj_fake):
     return ade, fde
 
 
-def save_checkpoint(state, is_best, filename="checkpoint.pth.tar"):
+def save_checkpoint(state, is_best,epoch,pred_len,  filename="checkpoint.pth.tar"):
     if is_best:
         torch.save(state, filename)
         logging.info("-------------- lower ade ----------------")
-        shutil.copyfile(filename, "model_best.pth.tar")
+        shutil.copyfile(filename, f"model_best{args.dataset_name,args.best_k, epoch, pred_len}.pth.tar")
 
 
 if __name__ == "__main__":
