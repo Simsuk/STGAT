@@ -31,7 +31,7 @@ parser.add_argument("--obs_len", default=8, type=int)
 parser.add_argument("--pred_len", default=12, type=int)
 parser.add_argument("--skip", default=1, type=int)
 
-parser.add_argument("--seed", type=int, default=72, help="Random seed.")
+parser.add_argument("--seed", type=int, default=0, help="Random seed.")
 parser.add_argument("--batch_size", default=64, type=int)
 parser.add_argument("--num_epochs", default=400, type=int)
 
@@ -84,7 +84,7 @@ parser.add_argument(
     help="manual epoch number (useful on restarts)",
 )
 
-parser.add_argument("--best_k", default=20, type=int)
+parser.add_argument("--best_k", default=1, type=int)
 parser.add_argument("--print_every", default=10, type=int)
 parser.add_argument("--use_gpu", default=1, type=int)
 parser.add_argument("--gpu_num", default="0", type=str)
@@ -195,7 +195,7 @@ def main(args):
                 is_best,
                 epoch,
                 args.pred_len,
-                f"./checkpoint/checkpoint{args.dataset_name,args.best_k, epoch, args.pred_len}.pth.tar"
+                f"./checkpoint/checkpoint{args.dataset_name,args.best_k, epoch, args.pred_len, args.seed}.pth.tar"
             )
     writer.close()
 
@@ -217,6 +217,11 @@ def train(args, model, train_loader, optimizer, epoch, training_step, writer):
             loss_mask,
             seq_start_end,
         ) = batch
+        # print("seq_start_end",seq_start_end.shape, seq_start_end)
+
+        # print("BATCH size", obs_traj_rel.shape[1])
+        # print("obs_traj", obs_traj.shape)
+        # print("pred_traj_gt", pred_traj_gt.shape)
         optimizer.zero_grad()
         loss = torch.zeros(1).to(pred_traj_gt)
         l2_loss_rel = []
@@ -227,13 +232,21 @@ def train(args, model, train_loader, optimizer, epoch, training_step, writer):
             pred_traj_fake_rel = model(
                 model_input, obs_traj, seq_start_end, 1, training_step
             )
+            print("model_input", model_input.shape)
+            print("pred_traj_fake_rel", pred_traj_fake_rel.shape)
+            # model_input (8,b,2)
+            # pred_traj_fake_rel (8,b,2)
             l2_loss_rel.append(
                 l2_loss(pred_traj_fake_rel, model_input, loss_mask, mode="raw")
             )
         else:
             model_input = torch.cat((obs_traj_rel, pred_traj_gt_rel), dim=0)
+
             for _ in range(args.best_k):
                 pred_traj_fake_rel = model(model_input, obs_traj, seq_start_end, 0)
+                # print("model_input", model_input.shape)
+                # print("seq_start_end", type(seq_start_end), seq_start_end)
+                print("pred_traj_fake_rel", pred_traj_fake_rel.shape)
                 l2_loss_rel.append(
                     l2_loss(
                         pred_traj_fake_rel,
@@ -243,18 +256,22 @@ def train(args, model, train_loader, optimizer, epoch, training_step, writer):
                     )
                 )
 
-        l2_loss_sum_rel = torch.zeros(1).to(pred_traj_gt)
-        l2_loss_rel = torch.stack(l2_loss_rel, dim=1)
+        l2_loss_sum_rel = torch.zeros(1).to(pred_traj_gt) # list([(b)])
+        print("Original l2_loss_rel", len(l2_loss_rel), l2_loss_rel[0].shape)
+        l2_loss_rel = torch.stack(l2_loss_rel, dim=1) # list b*[(1)]
         for start, end in seq_start_end.data:
+            print("l2_loss_rel", len(l2_loss_rel), l2_loss_rel[0].shape)
             _l2_loss_rel = torch.narrow(l2_loss_rel, 0, start, end - start)
+            print("_l2_loss_rel", _l2_loss_rel.shape) # [scene_trajectories,1]
             _l2_loss_rel = torch.sum(_l2_loss_rel, dim=0)  # [20]
             _l2_loss_rel = torch.min(_l2_loss_rel) / (
                 (pred_traj_fake_rel.shape[0]) * (end - start)
-            )
+            )                       # average per pedestrian per scene
             l2_loss_sum_rel += _l2_loss_rel
 
         loss += l2_loss_sum_rel
         losses.update(loss.item(), obs_traj.shape[1])
+        print("LOSS", loss.shape, loss)
         loss.backward()
         optimizer.step()
         if batch_idx % args.print_every == 0:
@@ -280,6 +297,7 @@ def validate(args, model, val_loader, epoch, writer):
                 loss_mask,
                 seq_start_end,
             ) = batch
+  
             loss_mask = loss_mask[:, args.obs_len :]
             pred_traj_fake_rel = model(obs_traj_rel, obs_traj, seq_start_end)
 
@@ -312,13 +330,30 @@ def save_checkpoint(state, is_best,epoch,pred_len,  filename="checkpoint.pth.tar
     if is_best:
         torch.save(state, filename)
         logging.info("-------------- lower ade ----------------")
-        shutil.copyfile(filename, f"model_best{args.dataset_name,args.best_k, epoch, pred_len}.pth.tar")
+        shutil.copyfile(filename, f"{args.checkpoint_dir}/model_best{args.dataset_name,args.best_k, epoch, pred_len, args.seed}.pth.tar")
 
 
 if __name__ == "__main__":
+    parser.add_argument('--runs', type=int, default=1, help='number of times the script runs')
+    parser.add_argument('--checkpoint_dir', type=str, default='checkpoint_repetitions_1V_8steps', help='dir for checkpoint when improvement occurs')
     args = parser.parse_args()
-    utils.set_logger(os.path.join(args.log_dir, "train.log"))
-    checkpoint_dir = "./checkpoint"
-    if os.path.exists(checkpoint_dir) is False:
-        os.mkdir(checkpoint_dir)
-    main(args)
+    if args.runs==1:
+        
+        utils.set_logger(os.path.join(args.log_dir, "train.log"))
+        checkpoint_dir = "./checkpoint_repetitions_1V_8steps"
+        print("Dataset: " + args.dataset_name + ". Script execution number: {}".format(set, args.seed))
+        if os.path.exists(checkpoint_dir) is False:
+            os.mkdir(checkpoint_dir)
+        main(args)
+    else:
+        for i, set in enumerate(['eth', 'hotel', 'zara1', 'zara2', 'univ']):
+            args.dataset_name=set
+            args.seed = i
+            print(args.seed)
+            utils.set_logger(os.path.join(args.log_dir, "train.log"))
+            checkpoint_dir = "./checkpoint_repetitions_1V_8steps"
+            args.checkpoint_dir=checkpoint_dir
+            print("Dataset: " + set + ". Script execution number: " + str(i))
+            if os.path.exists(checkpoint_dir) is False:
+                os.mkdir(checkpoint_dir)
+            main(args)

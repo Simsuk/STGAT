@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import random
-import numpy as np
 
 
 def get_noise(shape, noise_type):
@@ -110,8 +109,6 @@ class GATEncoder(nn.Module):
         graph_embeded_data = []
         for start, end in seq_start_end.data:
             curr_seq_embedding_traj = obs_traj_embedding[:, start:end, :]
-            print("curr_seq_embedding_traj", curr_seq_embedding_traj.shape)
-            print("seq_start_end", seq_start_end.shape)
             curr_seq_graph_embedding = self.gat_net(curr_seq_embedding_traj)
             graph_embeded_data.append(curr_seq_graph_embedding)
         graph_embeded_data = torch.cat(graph_embeded_data, dim=1)
@@ -204,15 +201,8 @@ class TrajectoryGenerator(nn.Module):
         training_step=3,
     ):
         batch = obs_traj_rel.shape[1]
-        # print("state_reversed" ,obs_traj_rel.shape)
-        # print("batch", batch)
-        print("obs_traj_rel" ,obs_traj_rel.shape)
-        print("seq_start_end", seq_start_end)
-        print("batch", batch)
         traj_lstm_h_t, traj_lstm_c_t = self.init_hidden_traj_lstm(batch)
         graph_lstm_h_t, graph_lstm_c_t = self.init_hidden_graph_lstm(batch)
-        # print("traj_lstm_h_t", traj_lstm_h_t.shape)
-        # print("traj_lstm_c_t", traj_lstm_c_t.shape)
         pred_traj_rel = []
         traj_lstm_hidden_states = []
         graph_lstm_hidden_states = []
@@ -221,7 +211,6 @@ class TrajectoryGenerator(nn.Module):
                 obs_traj_rel[: self.obs_len].size(0), dim=0
             )
         ):
-            print("input_t", i,input_t.shape)
             traj_lstm_h_t, traj_lstm_c_t = self.traj_lstm_model(
                 input_t.squeeze(0), (traj_lstm_h_t, traj_lstm_c_t)
             )
@@ -231,8 +220,6 @@ class TrajectoryGenerator(nn.Module):
             else:
                 traj_lstm_hidden_states += [traj_lstm_h_t]
         if training_step == 2:
-            for i, tensor in enumerate(traj_lstm_hidden_states):
-                print(f"Shape of tensor {i}:", tensor.cpu().detach().numpy().shape)
             graph_lstm_input = self.gatencoder(
                 torch.stack(traj_lstm_hidden_states), seq_start_end
             )
@@ -266,8 +253,6 @@ class TrajectoryGenerator(nn.Module):
             encoded_before_noise_hidden = torch.cat(
                 (traj_lstm_hidden_states[-1], graph_lstm_hidden_states[-1]), dim=1
             )
-            # print("traj_lstm_hidden_states",traj_lstm_hidden_states.shape, graph_lstm_hidden_states.shape)
-
             pred_lstm_hidden = self.add_noise(
                 encoded_before_noise_hidden, seq_start_end
             )
